@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: orbita-proxy
+    runtime: node
+    plan: free
+    rootDir: proxy-server
+    buildCommand: echo "sem dependencias"
+    startCommand: node server.cjs
+    healthCheckPath: /health
+    envVars:
+      - key: SERPAPI_KEY
+        sync: false

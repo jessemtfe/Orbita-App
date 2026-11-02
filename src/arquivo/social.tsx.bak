@@ -1,0 +1,418 @@
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useApp, useAppTheme } from "../../context/AppContext";
+import { getContentsSocial } from "../../services/contentService";
+import { ContentItem } from "../../types/content";
+import { openLink } from "../../utils/safe-url";
+
+type PlatformFilter =
+  | "Todos"
+  | "Bluesky"
+  | "LinkedIn"
+  | "Instagram"
+  | "TikTok"
+  | "Facebook"
+  | "Reddit"
+  | "Twitter/X";
+
+const filters: PlatformFilter[] = [
+  "Todos",
+  "Bluesky",
+  "LinkedIn",
+  "Instagram",
+  "TikTok",
+  "Facebook",
+  "Reddit",
+  "Twitter/X",
+];
+
+const platformIcons: Record<PlatformFilter, keyof typeof Ionicons.glyphMap> = {
+  Todos: "globe-outline",
+  Bluesky: "cloud-outline",
+  LinkedIn: "logo-linkedin",
+  Instagram: "logo-instagram",
+  TikTok: "logo-tiktok",
+  Facebook: "logo-facebook",
+  Reddit: "logo-reddit",
+  "Twitter/X": "logo-twitter",
+};
+
+const platformColors: Record<PlatformFilter, string> = {
+  Todos: "#7C3AED",
+  Bluesky: "#1185FE",
+  LinkedIn: "#0A66C2",
+  Instagram: "#E1306C",
+  TikTok: "#111827",
+  Facebook: "#1877F2",
+  Reddit: "#FF4500",
+  "Twitter/X": "#1D9BF0",
+};
+
+function getPlatform(platform?: string): PlatformFilter {
+  const p = platform?.toLowerCase() ?? "";
+  if (p.includes("instagram")) return "Instagram";
+  if (p.includes("tiktok")) return "TikTok";
+  if (p.includes("facebook")) return "Facebook";
+  if (p.includes("twitter") || p === "x") return "Twitter/X";
+  if (p.includes("linkedin")) return "LinkedIn";
+  if (p.includes("reddit")) return "Reddit";
+  if (p.includes("bluesky")) return "Bluesky";
+  return "Todos";
+}
+
+export default function SocialTab() {
+  const { colors } = useAppTheme();
+  const { interests } = useApp();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  const [content, setContent] = useState<ContentItem[]>([]);
+  const [selectedFilter, setSelectedFilter] = useState<PlatformFilter>("Todos");
+  const [keyword, setKeyword] = useState("");
+  const [searchedKeyword, setSearchedKeyword] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+
+  // Chave estável: só recarrega quando a lista de interesses realmente muda
+  const interestsKey = interests.join("|");
+
+  // Sem palavra-chave digitada, busca pelos interesses do usuário (RF03).
+  const load = useCallback(
+    async (term: string, isRefresh = false) => {
+      const trimmed = term.trim();
+      const queries = trimmed ? [trimmed] : interests;
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      setErrorMessage("");
+      setWarnings([]);
+
+      try {
+        const result = await getContentsSocial(queries);
+        setContent(result.items);
+        setWarnings(result.warnings);
+        setSearchedKeyword(trimmed);
+      } catch (error) {
+        setContent([]);
+        setErrorMessage(
+          error instanceof Error && error.message
+            ? error.message
+            : "Não foi possível consultar as redes sociais.",
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [interestsKey],
+  );
+
+  // Carrega ao abrir a aba e quando os interesses mudam (RN03: nada em segundo plano)
+  useEffect(() => {
+    if (!keyword.trim()) load("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
+
+  const visible = useMemo(
+    () =>
+      content.filter(
+        (item) =>
+          selectedFilter === "Todos" ||
+          getPlatform(item.platform) === selectedFilter,
+      ),
+    [content, selectedFilter],
+  );
+
+  const renderItem = ({ item }: { item: ContentItem }) => {
+    const platform = getPlatform(item.platform);
+    return (
+      <TouchableOpacity
+        activeOpacity={0.85}
+        disabled={!item.url}
+        onPress={() => openLink(item.url)}
+        accessibilityRole="link"
+        accessibilityLabel={`Abrir conteúdo de ${item.platform || "rede social"}`}
+        style={styles.card}
+      >
+        {item.imageUrl ? (
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={styles.cardImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={150}
+            accessibilityLabel={`Imagem da publicação de ${item.platform || "rede social"}`}
+          />
+        ) : null}
+        <View style={styles.cardHeader}>
+          <View style={[styles.platformIcon, { backgroundColor: platformColors[platform] }]}>
+            <Ionicons name={platformIcons[platform]} size={18} color="#FFFFFF" />
+          </View>
+          <View style={styles.authorContainer}>
+            <Text style={styles.author} numberOfLines={1}>
+              {item.author}
+            </Text>
+            <Text style={styles.platformName}>
+              {platform === "Todos" ? item.platform || "Rede social" : platform}
+            </Text>
+          </View>
+          <Text style={styles.time}>{item.createdAt}</Text>
+        </View>
+
+        <Text style={styles.interest}>{item.interest}</Text>
+        <Text style={styles.title} numberOfLines={3}>
+          {item.title}
+        </Text>
+        {item.summary && item.summary !== item.title ? (
+          <Text style={styles.summary} numberOfLines={6}>
+            {item.summary}
+          </Text>
+        ) : null}
+
+        <View style={styles.cardFooter}>
+          <Text style={styles.source}>Fonte: {item.platform || "rede social"}</Text>
+          <Ionicons name="open-outline" size={18} color={colors.primary} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <FlatList
+        data={visible}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => load(searchedKeyword, true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+        ListHeaderComponent={
+          <>
+            <View style={styles.header}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.titleHeader}>Redes sociais</Text>
+                <Text style={styles.subtitle}>
+                  {searchedKeyword
+                    ? `Resultados para “${searchedKeyword}”`
+                    : "Publicações dos seus interesses, da mais nova para a mais antiga."}
+                </Text>
+              </View>
+              <TouchableOpacity
+                accessibilityLabel="Atualizar conteúdos sociais"
+                onPress={() => load(searchedKeyword, true)}
+                style={styles.refreshButton}
+              >
+                <Ionicons name="refresh-outline" size={22} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={filters}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => item}
+              contentContainerStyle={styles.filters}
+              renderItem={({ item }) => {
+                const selected = item === selectedFilter;
+                return (
+                  <TouchableOpacity
+                    onPress={() => setSelectedFilter(item)}
+                    style={[styles.filter, selected && styles.filterSelected]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                  >
+                    <Ionicons
+                      name={platformIcons[item]}
+                      size={16}
+                      color={selected ? "#FFFFFF" : platformColors[item] === "#111827" ? colors.text : platformColors[item]}
+                    />
+                    <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
+                      {item}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            <View style={styles.searchRow}>
+              <TextInput
+                value={keyword}
+                onChangeText={setKeyword}
+                onSubmitEditing={() => load(keyword)}
+                placeholder="Buscar outra palavra-chave..."
+                placeholderTextColor={colors.textSecondary}
+                returnKeyType="search"
+                maxLength={80}
+                style={styles.searchInput}
+                accessibilityLabel="Palavra-chave para buscar nas redes sociais"
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  if (!keyword.trim()) setSearchedKeyword("");
+                  load(keyword);
+                }}
+                style={styles.searchButton}
+                accessibilityLabel="Buscar palavra-chave"
+              >
+                <Ionicons name="search-outline" size={21} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            {errorMessage ? (
+              <View style={styles.notice}>
+                <Ionicons name="alert-circle-outline" size={18} color="#B91C1C" />
+                <Text style={styles.noticeText}>{errorMessage}</Text>
+              </View>
+            ) : warnings.length > 0 ? (
+              <View style={styles.notice}>
+                <Ionicons name="information-circle-outline" size={18} color="#B45309" />
+                <Text style={styles.noticeText}>
+                  Algumas fontes não responderam:{"\n"}
+                  {warnings.join("\n")}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.emptyText}>Buscando nas redes sociais...</Text>
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="chatbubbles-outline" size={42} color={colors.primary} />
+              <Text style={styles.emptyTitle}>Nenhum resultado encontrado</Text>
+              <Text style={styles.emptyText}>
+                Tente outra palavra-chave ou selecione outra rede.
+              </Text>
+            </View>
+          )
+        }
+      />
+    </View>
+  );
+}
+
+type ThemeColors = ReturnType<typeof useAppTheme>["colors"];
+
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    listContent: { padding: 16, paddingBottom: 32 },
+    header: { flexDirection: "row", alignItems: "flex-start", marginBottom: 16, gap: 12 },
+    titleHeader: { color: c.text, fontSize: 24, fontWeight: "800" },
+    subtitle: { color: c.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
+    refreshButton: {
+      alignItems: "center",
+      backgroundColor: c.backgroundElement,
+      borderColor: c.border,
+      borderWidth: 1,
+      borderRadius: 22,
+      height: 44,
+      justifyContent: "center",
+      width: 44,
+    },
+    searchRow: { flexDirection: "row", gap: 8, marginBottom: 16 },
+    searchInput: {
+      backgroundColor: c.backgroundElement,
+      borderColor: c.border,
+      borderRadius: 12,
+      borderWidth: 1,
+      color: c.text,
+      flex: 1,
+      fontSize: 15,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    searchButton: {
+      alignItems: "center",
+      backgroundColor: c.primary,
+      borderRadius: 12,
+      justifyContent: "center",
+      width: 50,
+    },
+    filters: { gap: 8, paddingBottom: 16 },
+    filter: {
+      alignItems: "center",
+      backgroundColor: c.backgroundElement,
+      borderColor: c.border,
+      borderRadius: 22,
+      borderWidth: 1,
+      flexDirection: "row",
+      gap: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    filterSelected: { backgroundColor: c.primary, borderColor: c.primary },
+    filterText: { color: c.textSecondary, fontSize: 13, fontWeight: "700" },
+    filterTextSelected: { color: "#FFFFFF" },
+    notice: {
+      alignItems: "center",
+      backgroundColor: "#FEF2F2",
+      borderRadius: 12,
+      flexDirection: "row",
+      gap: 8,
+      marginBottom: 16,
+      padding: 12,
+    },
+    noticeText: { color: "#991B1B", flex: 1, fontSize: 12, lineHeight: 17 },
+    card: {
+      backgroundColor: c.backgroundElement,
+      borderColor: c.border,
+      borderRadius: 16,
+      borderWidth: 1,
+      marginBottom: 14,
+      padding: 16,
+    },
+    cardImage: { borderRadius: 12, height: 220, marginBottom: 14, width: "100%" },
+    cardHeader: { alignItems: "center", flexDirection: "row", marginBottom: 14 },
+    platformIcon: {
+      alignItems: "center",
+      borderRadius: 18,
+      height: 36,
+      justifyContent: "center",
+      width: 36,
+    },
+    authorContainer: { flex: 1, marginLeft: 10 },
+    author: { color: c.text, fontSize: 14, fontWeight: "700" },
+    platformName: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
+    time: { color: c.textSecondary, fontSize: 12 },
+    interest: { color: c.primary, fontSize: 13, fontWeight: "700", marginBottom: 7 },
+    title: { color: c.text, fontSize: 17, fontWeight: "800", lineHeight: 23, marginBottom: 7 },
+    summary: { color: c.textSecondary, fontSize: 14, lineHeight: 21 },
+    cardFooter: {
+      alignItems: "center",
+      borderTopColor: c.border,
+      borderTopWidth: 1,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      marginTop: 15,
+      paddingTop: 12,
+    },
+    source: { color: c.textSecondary, fontSize: 12, fontWeight: "600" },
+    emptyState: { alignItems: "center", paddingHorizontal: 24, paddingTop: 48 },
+    emptyTitle: { color: c.text, fontSize: 17, fontWeight: "700", marginTop: 12 },
+    emptyText: { color: c.textSecondary, fontSize: 14, marginTop: 8, textAlign: "center" },
+  });
